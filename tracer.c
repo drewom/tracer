@@ -19,6 +19,29 @@ typedef struct {
 } v3u_t;
 #pragma pack(pop)
 
+static void write_test_image(v3u_t *pixels, size_t width, size_t height);
+
+int
+main (int argc, char *argv[]) { (void)argc;  (void)argv;
+	enum { WIDTH = 120, SQUARE_SIZE = 16 };
+	if (isatty(fileno(stdout))) {
+		puts("output should be piped to a file, as output is binary");
+		return 1;
+	}
+	freopen(0, "wb", stdout);
+
+	v3u_t buffer[WIDTH*WIDTH];
+	write_test_image((v3u_t *)&buffer, WIDTH, WIDTH);
+
+	printf("P6\t%d\t%d\t255\t", WIDTH, WIDTH);
+	for (int y=0, yN=WIDTH; y<yN; ++y) {
+		fwrite(buffer, sizeof(buffer), 1, stdout);
+	}
+	fflush(stdout);
+
+	return 0;
+}
+
 static void
 write_test_image(v3u_t *pixels, size_t width, size_t height) {
 	qassert(pixels);
@@ -52,23 +75,3 @@ write_test_image(v3u_t *pixels, size_t width, size_t height) {
 	}
 }
 
-int
-main (int argc, char *argv[]) { (void)argc;  (void)argv;
-	enum { WIDTH = 120, SQUARE_SIZE = 16 };
-	if (isatty(fileno(stdout))) {
-		puts("output should be piped to a file, as output is binary");
-		return 1;
-	}
-	freopen(0, "wb", stdout);
-
-	v3u_t buffer[WIDTH*WIDTH];
-	write_test_image((v3u_t *)&buffer, WIDTH, WIDTH);
-
-	printf("P6\t%d\t%d\t255\t", WIDTH, WIDTH);
-	for (int y=0, yN=WIDTH; y<yN; ++y) {
-		fwrite(buffer, sizeof(buffer), 1, stdout);
-	}
-	fflush(stdout);
-
-	return 0;
-}
