@@ -43,26 +43,17 @@ fillout_test_image(v3u_t *pixels, size_t width, size_t height) {
 	enum { SQUARE_SIZE = 16 };
 
 	static v3u_t cboard[2] = { {0xAA,0xAA,0xAA},{0xCC,0xCC,0xCC} };
+	static v3u_t corners[4] = { {0xCC, 0x00, 0x00}, {0x00, 0xCC, 0x00}, {0x00, 0x00, 0xCC}, {} };
 
 
 	for (int y=0, yN=height; y<yN; ++y) {
 		for (int x=0, xN=width; x<xN; ++x) {
-			if (!(x/SQUARE_SIZE) && !(y/SQUARE_SIZE)){
-				pixels[x+y*xN].r = 0xCC;
-				pixels[x+y*xN].g = 0x00;
-				pixels[x+y*xN].b = 0x00;
-			} else if (x/SQUARE_SIZE == (xN-1)/SQUARE_SIZE && !(y/SQUARE_SIZE)){
-				pixels[x+y*xN].r = 0x00;
-				pixels[x+y*xN].g = 0xCC;
-				pixels[x+y*xN].b = 0x00;
-			} else if (!(x/SQUARE_SIZE) && y/SQUARE_SIZE == (yN-1)/SQUARE_SIZE){
-				pixels[x+y*xN].r = 0x00;
-				pixels[x+y*xN].g = 0x00;
-				pixels[x+y*xN].b = 0xCC;
-			} else if (x/SQUARE_SIZE == (xN-1)/SQUARE_SIZE && y/SQUARE_SIZE == (yN-1)/SQUARE_SIZE){
-				pixels[x+y*xN].r = 0x00;
-				pixels[x+y*xN].g = 0x00;
-				pixels[x+y*xN].b = 0x00;
+			int top    = !(x/SQUARE_SIZE),
+				 bottom = x/SQUARE_SIZE == (xN-1)/SQUARE_SIZE,
+			    left   = !(y/SQUARE_SIZE),
+				 right  = y/SQUARE_SIZE == (yN-1)/SQUARE_SIZE;
+			if((top || bottom) && (left || right)){
+				pixels[x+y*xN] = corners[bottom*2|right];
 			} else { /* not a corner, checkerboard */
 				pixels[x+y*xN] = cboard[(x/SQUARE_SIZE+y/SQUARE_SIZE)%2];
 			}
