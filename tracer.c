@@ -19,7 +19,8 @@ typedef struct {
 } v3u_t;
 #pragma pack(pop)
 
-static void write_test_image(v3u_t *pixels, size_t width, size_t height);
+static void fillout_test_image(v3u_t *pixels, size_t width, size_t height);
+static void write_test_image_out(FILE *to, v3u_t *pixels, size_t width, size_t height);
 
 int
 main (int argc, char *argv[]) { (void)argc;  (void)argv;
@@ -28,22 +29,16 @@ main (int argc, char *argv[]) { (void)argc;  (void)argv;
 		puts("output should be piped to a file, as output is binary");
 		return 1;
 	}
-	freopen(0, "wb", stdout);
 
 	v3u_t buffer[WIDTH*WIDTH];
-	write_test_image((v3u_t *)&buffer, WIDTH, WIDTH);
-
-	printf("P6\t%d\t%d\t255\t", WIDTH, WIDTH);
-	for (int y=0, yN=WIDTH; y<yN; ++y) {
-		fwrite(buffer, sizeof(buffer), 1, stdout);
-	}
-	fflush(stdout);
+	fillout_test_image((v3u_t *)&buffer, WIDTH, WIDTH);
+	write_test_image_out(stdout, (v3u_t *)&buffer, WIDTH, WIDTH);
 
 	return 0;
 }
 
 static void
-write_test_image(v3u_t *pixels, size_t width, size_t height) {
+fillout_test_image(v3u_t *pixels, size_t width, size_t height) {
 	qassert(pixels);
 	enum { SQUARE_SIZE = 16 };
 
@@ -75,3 +70,10 @@ write_test_image(v3u_t *pixels, size_t width, size_t height) {
 	}
 }
 
+static void write_test_image_out(FILE *to, v3u_t *pixels, size_t width, size_t height) {
+	freopen(0, "wb", stdout); /* Ensure this stream is open in binary mode */
+
+	printf("P6\t%ld\t%ld\t255\t", width, height);
+	fwrite(pixels, width*height*sizeof(v3u_t), 1, to);
+	fflush(to);
+}
