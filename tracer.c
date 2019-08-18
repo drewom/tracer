@@ -10,17 +10,17 @@
 #include <qmisc/macros.h>
 
 #include <unistd.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct {
 	uint8_t r,g,b;
-} v3u_t;
+} rgb24_t;
 #pragma pack(pop)
 
-static void fillout_test_image(v3u_t *pixels, size_t width, size_t height);
-static void write_test_image_out(FILE *to, v3u_t *pixels, size_t width, size_t height);
+static void fillout_test_image(rgb24_t *pixels, size_t width, size_t height);
+static void write_test_image_out(FILE *to, rgb24_t *pixels, size_t width, size_t height);
 
 int
 main (int argc, char *argv[]) { (void)argc;  (void)argv;
@@ -30,20 +30,20 @@ main (int argc, char *argv[]) { (void)argc;  (void)argv;
 		return 1;
 	}
 
-	v3u_t buffer[WIDTH*WIDTH];
-	fillout_test_image((v3u_t *)&buffer, WIDTH, WIDTH);
-	write_test_image_out(stdout, (v3u_t *)&buffer, WIDTH, WIDTH);
+	rgb24_t *buffer = malloc(sizeof(rgb24_t)*WIDTH*WIDTH);
+	fillout_test_image(buffer, WIDTH, WIDTH);
+	write_test_image_out(stdout, buffer, WIDTH, WIDTH);
 
 	return 0;
 }
 
 static void
-fillout_test_image(v3u_t *pixels, size_t width, size_t height) {
+fillout_test_image(rgb24_t *pixels, size_t width, size_t height) {
 	qassert(pixels);
 	enum { SQUARE_SIZE = 16 };
 
-	static v3u_t cboard[2] = { {0xAA,0xAA,0xAA},{0xCC,0xCC,0xCC} };
-	static v3u_t corners[4] = { {0xCC, 0x00, 0x00}, {0x00, 0xCC, 0x00}, {0x00, 0x00, 0xCC}, {} };
+	static rgb24_t cboard[2] = { {0xAA,0xAA,0xAA},{0xCC,0xCC,0xCC} };
+	static rgb24_t corners[4] = { {0xCC, 0x00, 0x00}, {0x00, 0xCC, 0x00}, {0x00, 0x00, 0xCC}, {} };
 
 
 	for (int y=0, yN=height; y<yN; ++y) {
@@ -61,10 +61,10 @@ fillout_test_image(v3u_t *pixels, size_t width, size_t height) {
 	}
 }
 
-static void write_test_image_out(FILE *to, v3u_t *pixels, size_t width, size_t height) {
+static void write_test_image_out(FILE *to, rgb24_t *pixels, size_t width, size_t height) {
 	freopen(0, "wb", stdout); /* Ensure this stream is open in binary mode */
 
 	printf("P6\t%ld\t%ld\t255\t", width, height);
-	fwrite(pixels, width*height*sizeof(v3u_t), 1, to);
+	fwrite(pixels, width*height*sizeof(rgb24_t), 1, to);
 	fflush(to);
 }
