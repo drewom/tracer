@@ -8,10 +8,12 @@
  */
 
 #include <qmisc/macros.h>
+#include <qmisc/tensor.h>
 
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <float.h>
 #include <getopt.h>
 
 #pragma pack(push, 1) // exact fit - no padding
@@ -21,13 +23,66 @@ typedef struct {
 #pragma pack(pop)
 
 typedef struct {
+	/* camera */
+	v3_t cam_pos, cam_x, cam_y, cam_z;
+
+	/* material, zero is special miss case */
+	size_t material_count;
+	v3_t  *material_colour;
+
+	/* planes */
+	size_t plane_count;
+	v3_t   *plane_normal;
+	float  *plane_dist;
+	size_t *plane_marterial;
+
+	/* spheres */
+	size_t sphere_count;
+	v3_t   *sphere_centre;
+	float  *sphere_radius;
+	size_t *sphere_marterial;
+} scene_t;
+
+typedef struct {
+	v3_t ori, nrm;
+} ray_t;
+
+typedef struct {
 	int width, height;
 	FILE *out;
 } settings_t;
 
 static settings_t parse_options(int argc, char *argv[]);
 static void fillout_test_image(rgb24_t *pixels, size_t width, size_t height);
-static void write_test_image_out(FILE *to, rgb24_t *pixels, size_t width, size_t height);
+static void write_image_to_ppm(FILE *to, rgb24_t *pixels, size_t width, size_t height);
+
+static float
+raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
+	qassert(scene); qassert(out);
+
+	float dist = FLT_MAX;
+	for(int p=0, pN=scene->plane_count; p<pN; ++p){
+
+		v3_t p_nrm = scene->plane_normal[p];
+		float p_dst = scene->plane_dist[p];
+
+		/* plane equ: pT*nrm + ori = 0; ray: p = ori + nrm*t */
+		float divide = v3T_mult_v3(p_nrm.T, ray.nrm);
+		if (divide < FLT_EPSILON && divide > -FLT_EPSILON) {
+			continue;
+		}
+		float curr = (-p_dst - v3T_mult_v3(p_nrm.T, ray.ori)) / divide;
+		if (curr > 0.f && curr < dist) {
+			//*out = scene->material_colour[scene->plane_marterial[p]];
+			rgb24_t colour = {};
+			colour.r=100;
+			*out = colour;
+
+			dist = curr;
+		}
+	}
+	return dist;
+}
 
 int
 main (int argc, char *argv[]) {
@@ -37,7 +92,43 @@ main (int argc, char *argv[]) {
 	rgb24_t *buffer = malloc(sizeof(rgb24_t)*settings.width*settings.height);
 	fillout_test_image(buffer, settings.width, settings.height);
 
-	write_test_image_out(settings.out, buffer, settings.width, settings.height);
+	/* Raytracer start here */
+	scene_t scene = {};
+	scene.cam_pos = v3(0.f, 10.f, 1000.f);
+	scene.cam_z = v3_norm_or_zero(scene.cam_pos);
+	scene.cam_x = v3_norm_or_zero(v3_cross(v3(0,1,0), scene.cam_pos));
+	scene.cam_y = v3_norm_or_zero(v3_cross(scene.cam_y, scene.cam_z));
+
+	v3_t plane_normals[] = {v3(0,1.f,0)};
+	float plane_dist[] = {0.f};
+	scene.plane_normal = plane_normals;
+	scene.plane_dist = plane_dist;
+	scene.plane_count = qcountof(plane_normals);
+
+	v3_t  sphere_centres[] = {v3(0,1.f,0)};
+	float sphere_radii[] = {1.f};
+	scene.sphere_centre = sphere_centres;
+	scene.sphere_radius = sphere_radii;
+	scene.sphere_count = qcountof(sphere_centres);
+
+	for (int y=0, yN=settings.height; y<yN; ++y) {
+		float nearplane_v = +1.f - 2.f*((float)y/(float)yN);
+		for (int x=0, xN=settings.width; x<xN; ++x) {
+			float nearplane_u = -1.f + 2.f*((float)x/(float)xN);
+
+			ray_t ray = {};
+			ray.ori = scene.cam_pos;
+			ray.nrm = v3_neg(scene.cam_z);
+			ray.nrm.x += nearplane_u;
+			ray.nrm.y += nearplane_v;
+			raycast(ray, &scene, &buffer[x+y*xN]);
+		}
+	}
+
+
+
+	/* Write out image */
+	write_image_to_ppm(settings.out, buffer, settings.width, settings.height);
 	return 0;
 }
 
@@ -64,7 +155,7 @@ fillout_test_image(rgb24_t *pixels, size_t width, size_t height) {
 	}
 }
 
-static void write_test_image_out(FILE *to, rgb24_t *pixels, size_t width, size_t height) {
+static void write_image_to_ppm(FILE *to, rgb24_t *pixels, size_t width, size_t height) {
 	qassert(to);
 	freopen(0, "wb", to); /* Ensure this stream is open in binary mode */
 
