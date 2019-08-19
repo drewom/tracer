@@ -21,12 +21,25 @@ typedef struct {
 	uint8_t r,g,b;
 } rgb24_t;
 #pragma pack(pop)
+static rgb24_t
+rgb24 (uint8_t r, uint8_t g, uint8_t b) {
+	rgb24_t res = {r, g, b};
+	return res;
+}
+static rgb24_t
+rgb24_from_v3 (v3_t rgb) {
+	rgb24_t res = {};
+	res.r = qclamp(0, rgb.r*UINT8_MAX, UINT8_MAX);
+	res.g = qclamp(0, rgb.g*UINT8_MAX, UINT8_MAX);
+	res.b = qclamp(0, rgb.b*UINT8_MAX, UINT8_MAX);
+	return res;
+}
 
 typedef struct {
 	/* camera */
 	v3_t cam_pos, cam_x, cam_y, cam_z;
 
-	/* material, zero is special miss case */
+	/* material */
 	size_t material_count;
 	v3_t  *material_colour;
 
@@ -34,13 +47,13 @@ typedef struct {
 	size_t plane_count;
 	v3_t   *plane_normal;
 	float  *plane_dist;
-	size_t *plane_marterial;
+	size_t *plane_material;
 
 	/* spheres */
 	size_t sphere_count;
 	v3_t   *sphere_centre;
 	float  *sphere_radius;
-	size_t *sphere_marterial;
+	size_t *sphere_material;
 } scene_t;
 
 typedef struct {
@@ -73,10 +86,7 @@ raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 		}
 		float curr = (-p_dst - v3T_mult_v3(p_nrm.T, ray.ori)) / divide;
 		if (curr > 0.f && curr < dist) {
-			//*out = scene->material_colour[scene->plane_marterial[p]];
-			rgb24_t colour = {};
-			colour.r=100;
-			*out = colour;
+			*out = rgb24_from_v3(scene->material_colour[scene->plane_material[p]]);
 
 			dist = curr;
 		}
@@ -99,16 +109,25 @@ main (int argc, char *argv[]) {
 	scene.cam_x = v3_norm_or_zero(v3_cross(v3(0,1,0), scene.cam_pos));
 	scene.cam_y = v3_norm_or_zero(v3_cross(scene.cam_y, scene.cam_z));
 
+	v3_t material_colours[] = { v3(.3f,.3f,.3f), v3(.1f,.7f,.7f) };
 	v3_t plane_normals[] = {v3(0,1.f,0)};
 	float plane_dist[] = {0.f};
-	scene.plane_normal = plane_normals;
-	scene.plane_dist = plane_dist;
-	scene.plane_count = qcountof(plane_normals);
-
+	size_t plane_materials[] = {0};
 	v3_t  sphere_centres[] = {v3(0,1.f,0)};
 	float sphere_radii[] = {1.f};
+	size_t sphere_materials[] = {0};
+
+	scene.material_colour = material_colours;
+	scene.material_count = qcountof(material_colours);
+
+	scene.plane_normal = plane_normals;
+	scene.plane_dist = plane_dist;
+	scene.plane_material = plane_materials;
+	scene.plane_count = qcountof(plane_normals);
+
 	scene.sphere_centre = sphere_centres;
 	scene.sphere_radius = sphere_radii;
+	scene.sphere_material = sphere_materials;
 	scene.sphere_count = qcountof(sphere_centres);
 
 	for (int y=0, yN=settings.height; y<yN; ++y) {
@@ -124,8 +143,6 @@ main (int argc, char *argv[]) {
 			raycast(ray, &scene, &buffer[x+y*xN]);
 		}
 	}
-
-
 
 	/* Write out image */
 	write_image_to_ppm(settings.out, buffer, settings.width, settings.height);
@@ -148,7 +165,7 @@ fillout_test_image(rgb24_t *pixels, size_t width, size_t height) {
 				 right  = y/SQUARE_SIZE == (yN-1)/SQUARE_SIZE;
 			if((top || bottom) && (left || right)){
 				pixels[x+y*xN] = corners[bottom*2|right];
-			} else { /* not a corner, checkerboard */
+			} else { /* not a corner, so checker board */
 				pixels[x+y*xN] = cboard[(x/SQUARE_SIZE+y/SQUARE_SIZE)%2];
 			}
 		}
