@@ -75,57 +75,64 @@ raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 
 	/* points on ray: ray.ori + t*ray.nrm = point_on_ray where t>=0 */
 	float dist = FLT_MAX;
-	for(int p=0, pN=scene->plane_count; p<pN; ++p){
+	rgb24_t colour = {};
+	for(int r=0, rN=12; r<rN; r++) {
+		for(int p=0, pN=scene->plane_count; p<pN; ++p) {
+			/* plane equation:
+			 * pnT*rn - d */
+			v3_t p_nrm = scene->plane_normal[p];
+			float p_dst = scene->plane_dist[p];
 
-		v3_t p_nrm = scene->plane_normal[p];
-		float p_dst = scene->plane_dist[p];
+			float divide = v3T_mult_v3(p_nrm.T, ray.nrm);
+			if (divide < FLT_EPSILON && divide > -FLT_EPSILON) {
+				continue;
+			}
+			float curr = (-p_dst - v3T_mult_v3(p_nrm.T, ray.ori)) / divide;
+			if (curr > 0.f && curr < dist) {
+				colour = rgb24_from_v3(scene->material_colour[scene->plane_material[p]]);
 
-		float divide = v3T_mult_v3(p_nrm.T, ray.nrm);
-		if (divide < FLT_EPSILON && divide > -FLT_EPSILON) {
-			continue;
+				dist = curr;
+			}
 		}
-		float curr = (-p_dst - v3T_mult_v3(p_nrm.T, ray.ori)) / divide;
-		if (curr > 0.f && curr < dist) {
-			*out = rgb24_from_v3(scene->material_colour[scene->plane_material[p]]);
+		for(int s=0, sN=scene->sphere_count; s<sN; ++s){
+			/* sphere equation:
+			 * sT*s - s.r^2 = 0,
+			 * (ray.ori + t*ray.nrm)T*(ray.ori + t*ray.nrm) - s.r^2
+			 * solving for t:
+			 * 0 == t^2*ray.nrm.T*ray.nrm + t*2*ray.ori.T*ray.nrm + ray.ori.T*ray.ori-s.r^2
+			 *          ^a term^              ^b term^              ^c term^
+			 * t == -b +/- sqrt(b^2 -4ac) / 2a
+			 */
+			v3_t s_ori = scene->sphere_centre[s];
+			float s_rad = scene->sphere_radius[s];
 
-			dist = curr;
+			ray_t r = ray;
+			r.ori = v3_add(ray.ori, v3_neg(s_ori));
+
+			/* convert r to unit circle space */
+			float a =   v3T_mult_v3(r.nrm.T, r.nrm),
+					b = 2*v3T_mult_v3(r.ori.T, r.nrm),
+					c =   v3T_mult_v3(r.ori.T, r.ori)-(s_rad*s_rad);
+			float sqrt_term = b*b - 4.f*a*c;
+			float _2a = 2.f*a;
+
+			if (sqrt_term < FLT_EPSILON) {
+				continue; /* ray misses sphere */
+			}
+			qassert(_2a > FLT_EPSILON || _2a < -FLT_EPSILON); /* ray normal was zero? */
+
+			/* treat spheres as one sided, if you want to draw inside then invert radius */
+			float curr = -b - sqrt(sqrt_term);
+			curr /= _2a;
+			if (curr > 0.f && curr < dist) {
+				colour = rgb24_from_v3(scene->material_colour[scene->sphere_material[s]]);
+
+				dist = curr;
+			}
 		}
 	}
-	for(int s=0, sN=scene->sphere_count; s<sN; ++s){
-		/* sphere equation:
-		 * pT*p - s.r^2 = 0,
-		 * (ray.ori + t*ray.nrm)T*(ray.ori + t*ray.nrm) - s.r^2
-		 * solving for t:
-		 * 0 == t^2*ray.nrm.T*ray.nrm + t*2*ray.ori.T*ray.nrm + ray.ori.T*ray.ori-s.r^2
-		 *          ^a term^              ^b term^              ^c term^
-		 * t == -b +/- sqrt(b^2 -4ac) / 2a
-		 */
-		v3_t s_ori = scene->sphere_centre[s];
-		float s_rad = scene->sphere_radius[s];
-
-		ray_t r = ray;
-		r.ori = v3_add(ray.ori, v3_neg(s_ori));
-
-		/* convert r to unit circle space */
-		float a =   v3T_mult_v3(r.nrm.T, r.nrm),
-		      b = 2*v3T_mult_v3(r.ori.T, r.nrm),
-		      c =   v3T_mult_v3(r.ori.T, r.ori)-(s_rad*s_rad);
-		float sqrt_term = b*b - 4.f*a*c;
-		float _2a = 2.f*a;
-
-		if (sqrt_term < FLT_EPSILON) {
-			continue; /* ray misses sphere */
-		}
-		qassert(_2a > FLT_EPSILON || _2a < -FLT_EPSILON); /* ray normal was zero? */
-
-		/* treat spheres as one sided, if you want to draw inside then invert radius */
-		float curr = -b - sqrt(sqrt_term);
-		curr /= _2a;
-		if (curr > 0.f && curr < dist) {
-			*out = rgb24_from_v3(scene->material_colour[scene->sphere_material[s]]);
-
-			dist = curr;
-		}
+	if (dist != FLT_MAX) {
+		*out = colour;
 	}
 	return dist;
 }
