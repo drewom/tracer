@@ -41,7 +41,9 @@ typedef struct {
 
 	/* material */
 	size_t material_count;
-	v3_t  *material_colour;
+	v3_t  *material_defuses;
+	v3_t  *material_emits;
+	float *material_gloss;
 
 	/* planes */
 	size_t plane_count;
@@ -57,7 +59,7 @@ typedef struct {
 } scene_t;
 
 typedef struct {
-	v3_t ori, nrm;
+	v3_t ori, norm;
 } ray_t;
 
 typedef struct {
@@ -73,23 +75,27 @@ static float
 raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 	qassert(scene); qassert(out);
 
-	/* points on ray: ray.ori + t*ray.nrm = point_on_ray where t>=0 */
+	/* points on ray: ray.ori + t*ray.norm = point_on_ray where t>=0 */
 	float dist = FLT_MAX;
-	rgb24_t colour = {};
+	v3_t contrib = v3(1.f, 1.f,1.f); /* sum of materials */
+	v3_t collect = {}; /* colour sum of current bounces */
 	for(int r=0, rN=12; r<rN; r++) {
+		size_t hit_mat = 0;
+		v3_t hit_norm = {};
 		for(int p=0, pN=scene->plane_count; p<pN; ++p) {
 			/* plane equation:
-			 * pnT*rn - d */
-			v3_t p_nrm = scene->plane_normal[p];
+			 * pnT*rn - d = 0 */
+			v3_t p_norm = scene->plane_normal[p];
 			float p_dst = scene->plane_dist[p];
 
-			float divide = v3T_mult_v3(p_nrm.T, ray.nrm);
+			float divide = v3T_mul_v3(p_norm.T, ray.norm);
 			if (divide < FLT_EPSILON && divide > -FLT_EPSILON) {
 				continue;
 			}
-			float curr = (-p_dst - v3T_mult_v3(p_nrm.T, ray.ori)) / divide;
+			float curr = (-p_dst - v3T_mul_v3(p_norm.T, ray.ori)) / divide;
 			if (curr > 0.f && curr < dist) {
-				colour = rgb24_from_v3(scene->material_colour[scene->plane_material[p]]);
+				hit_mat  = scene->plane_material[p];
+				hit_norm = p_norm;
 
 				dist = curr;
 			}
@@ -97,9 +103,9 @@ raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 		for(int s=0, sN=scene->sphere_count; s<sN; ++s){
 			/* sphere equation:
 			 * sT*s - s.r^2 = 0,
-			 * (ray.ori + t*ray.nrm)T*(ray.ori + t*ray.nrm) - s.r^2
+			 * (ray.ori + t*ray.norm)T*(ray.ori + t*ray.norm) - s.r^2
 			 * solving for t:
-			 * 0 == t^2*ray.nrm.T*ray.nrm + t*2*ray.ori.T*ray.nrm + ray.ori.T*ray.ori-s.r^2
+			 * 0 == t^2*ray.norm.T*ray.norm + t*2*ray.ori.T*ray.norm + ray.ori.T*ray.ori-s.r^2
 			 *          ^a term^              ^b term^              ^c term^
 			 * t == -b +/- sqrt(b^2 -4ac) / 2a
 			 */
@@ -110,9 +116,9 @@ raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 			r.ori = v3_add(ray.ori, v3_neg(s_ori));
 
 			/* convert r to unit circle space */
-			float a =   v3T_mult_v3(r.nrm.T, r.nrm),
-					b = 2*v3T_mult_v3(r.ori.T, r.nrm),
-					c =   v3T_mult_v3(r.ori.T, r.ori)-(s_rad*s_rad);
+			float a =   v3T_mul_v3(r.norm.T, r.norm),
+					b = 2*v3T_mul_v3(r.ori.T, r.norm),
+					c =   v3T_mul_v3(r.ori.T, r.ori)-(s_rad*s_rad);
 			float sqrt_term = b*b - 4.f*a*c;
 			float _2a = 2.f*a;
 
@@ -125,14 +131,35 @@ raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 			float curr = -b - sqrt(sqrt_term);
 			curr /= _2a;
 			if (curr > 0.f && curr < dist) {
-				colour = rgb24_from_v3(scene->material_colour[scene->sphere_material[s]]);
-
+				hit_mat  = scene->sphere_material[s];
+				hit_norm = v3_norm_or_zero(v3_sub(v3_add(ray.ori, v3_mul(ray.norm, curr)), s_ori));
 				dist = curr;
 			}
 		}
+		/* We now should have the first hit for this ray
+		*/
+		if (!hit_mat) {
+			break; /* this ray hit nothing, cannot bounce futher */
+		} else {
+			/* add in material emit, if any */
+			collect = v3_add(collect, v3_mul_entrywise(contrib, scene->material_emits[hit_mat]));
+
+			/* update contrib for next bounce */
+			contrib = v3_mul_entrywise(contrib, scene->material_defuses[hit_mat]);
+
+			/* calculate next ray via bouncing it */
+			ray.ori = v3_add(ray.ori, v3_mul(ray.norm, dist)); /* origin of last hit */
+
+			v3_t random_norm = {};
+			v3_t scatter = v3_norm_or_zero(v3_add(hit_norm, random_norm));
+			v3_t reflect = scatter; /* TODO: calc reflect ray normal */
+			ray.norm = v3_lerp(scatter, scene->material_gloss[hit_mat], reflect);
+		}
 	}
 	if (dist != FLT_MAX) {
-		*out = colour;
+		/* we hit something at least once */
+		*out = rgb24_from_v3(collect);
+
 	}
 	return dist;
 }
@@ -152,16 +179,27 @@ main (int argc, char *argv[]) {
 	scene.cam_x = v3_norm_or_zero(v3_cross(v3(0,1,0), scene.cam_pos));
 	scene.cam_y = v3_norm_or_zero(v3_cross(scene.cam_y, scene.cam_z));
 
-	v3_t material_colours[] = { v3(.3f,.3f,.2f), v3(.2f,.2f,.4f), v3(.1f,.5f,.4f), v3(.1f, .8f, .5f), v3(.6f, .1f, .5f), v3(.3f, .5f, .8f),  };
+	v3_t material_emits[7], material_defuses[7];
+	float material_glosses[7] = {};
+	material_emits[1]   = v3(.3f,.5f,.8f);
+	material_defuses[1] = v3(.3f,.3f,.2f);
+	material_defuses[2] = v3(.2f,.2f,.4f);
+	material_defuses[3] = v3(.1f,.5f,.4f);
+	material_defuses[4] = v3(.1f,.8f,.5f);
+	material_defuses[5] = v3(.6f,.1f,.5f);
+	material_emits[6] = v3(.3f,.5f,.8f);
+
 	v3_t plane_normals[] = {v3(0,1.f,0), v3_norm_or_zero(v3(-1.f, 4.f, 0)), v3_norm_or_zero(v3(1.f, 3.f, 0))};
 	float plane_dist[] = {0.f, 4.f, 8.f};
-	size_t plane_materials[] = {0, 1, 2};
+	size_t plane_materials[] = {1, 2, 3};
 	v3_t  sphere_centres[] = {v3(0,3.f,3),v3(5.f,0,3),v3(-4.f,3.f,6.f)};
 	float sphere_radii[] = {3.f, 2.f, 1.f};
-	size_t sphere_materials[] = {3, 4, 5};
+	size_t sphere_materials[] = {4, 5, 6};
 
-	scene.material_colour = material_colours;
-	scene.material_count = qcountof(material_colours);
+	scene.material_defuses = material_defuses;
+	scene.material_emits = material_emits;
+	scene.material_gloss = material_glosses;
+	scene.material_count = qcountof(material_emits);
 
 	scene.plane_normal = plane_normals;
 	scene.plane_dist = plane_dist;
@@ -188,9 +226,9 @@ main (int argc, char *argv[]) {
 
 			ray_t ray = {};
 			ray.ori = scene.cam_pos;
-			ray.nrm = v3_neg(scene.cam_z);
-			ray.nrm.x += nearplane_u;
-			ray.nrm.y += nearplane_v;
+			ray.norm = v3_neg(scene.cam_z);
+			ray.norm.x += nearplane_u;
+			ray.norm.y += nearplane_v;
 			raycast(ray, &scene, &buffer[x+y*xN]);
 		}
 	}
