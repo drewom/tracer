@@ -72,14 +72,14 @@ static void fillout_test_image(rgb24_t *pixels, size_t width, size_t height);
 static void write_image_to_ppm(FILE *to, rgb24_t *pixels, size_t width, size_t height);
 
 static float
-raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
+raycast (ray_t ray, scene_t *scene, v3_t *out) {
 	qassert(scene); qassert(out);
 
 	/* points on ray: ray.ori + t*ray.norm = point_on_ray where t>=0 */
 	float dist = FLT_MAX;
 	v3_t contrib = v3(1.f, 1.f,1.f); /* sum of materials */
 	v3_t collect = {}; /* colour sum of current bounces */
-	for(int r=0, rN=12; r<rN; r++) {
+	for(int r=0, rN=4; r<rN; r++) {
 		size_t hit_mat = 0;
 		v3_t hit_norm = {};
 		for(int p=0, pN=scene->plane_count; p<pN; ++p) {
@@ -136,30 +136,38 @@ raycast (ray_t ray, scene_t *scene, rgb24_t *out) {
 				dist = curr;
 			}
 		}
-		/* We now should have the first hit for this ray
-		*/
+		/* add in material emit, idx is 0 if sky */
+		collect = v3_add(collect, v3_mul_entrywise(contrib, scene->material_emits[hit_mat]));
+
+		/* update contrib for next bounce */
+		contrib = v3_mul_entrywise(contrib, scene->material_defuses[hit_mat]);
+
+		/* We now should have the first hit for this ray */
 		if (!hit_mat) {
 			break; /* this ray hit nothing, cannot bounce futher */
 		} else {
-			/* add in material emit, if any */
-			collect = v3_add(collect, v3_mul_entrywise(contrib, scene->material_emits[hit_mat]));
-
-			/* update contrib for next bounce */
-			contrib = v3_mul_entrywise(contrib, scene->material_defuses[hit_mat]);
 
 			/* calculate next ray via bouncing it */
 			ray.ori = v3_add(ray.ori, v3_mul(ray.norm, dist)); /* origin of last hit */
 
+#if 1
+			v3_t random_norm = v3_norm_or_zero(v3(
+					((float)rand()/(float)RAND_MAX*2.f)-1.f,
+					((float)rand()/(float)RAND_MAX*2.f)-1.f,
+					((float)rand()/(float)RAND_MAX*2.f)-1.f));
+			random_norm = v3_mul(random_norm, 0.05f);
+#else
 			v3_t random_norm = {};
+#endif
+
 			v3_t scatter = v3_norm_or_zero(v3_add(hit_norm, random_norm));
-			v3_t reflect = scatter; /* TODO: calc reflect ray normal */
+			v3_t reflect = v3_sub(ray.norm, v3_mul(hit_norm, 2*v3T_mul_v3(ray.norm.T, hit_norm)));
 			ray.norm = v3_lerp(scatter, scene->material_gloss[hit_mat], reflect);
 		}
 	}
 	if (dist != FLT_MAX) {
 		/* we hit something at least once */
-		*out = rgb24_from_v3(collect);
-
+		*out = collect;
 	}
 	return dist;
 }
@@ -179,18 +187,19 @@ main (int argc, char *argv[]) {
 	scene.cam_x = v3_norm_or_zero(v3_cross(v3(0,1,0), scene.cam_pos));
 	scene.cam_y = v3_norm_or_zero(v3_cross(scene.cam_y, scene.cam_z));
 
-	v3_t material_emits[7], material_defuses[7];
+	v3_t material_emits[7] = {}, material_defuses[7] = {};
 	float material_glosses[7] = {};
-	material_emits[1]   = v3(.3f,.5f,.8f);
+	material_glosses[4] = 0.999f;
+	material_emits[0]   = v3(.4f,.6f,1.9f);
 	material_defuses[1] = v3(.3f,.3f,.2f);
 	material_defuses[2] = v3(.2f,.2f,.4f);
-	material_defuses[3] = v3(.1f,.5f,.4f);
-	material_defuses[4] = v3(.1f,.8f,.5f);
+	material_defuses[3] = v3(.4f,.5f,.4f);
+	material_defuses[4] = v3(.4f,.8f,.5f);
 	material_defuses[5] = v3(.6f,.1f,.5f);
-	material_emits[6] = v3(.3f,.5f,.8f);
+	material_emits[6] = v3(.3f,.9f,.8f);
 
-	v3_t plane_normals[] = {v3(0,1.f,0), v3_norm_or_zero(v3(-1.f, 4.f, 0)), v3_norm_or_zero(v3(1.f, 3.f, 0))};
-	float plane_dist[] = {0.f, 4.f, 8.f};
+	v3_t plane_normals[] = {v3_norm_or_zero(v3(0.000f,0.9999f,0)), v3_norm_or_zero(v3(-1.f, 4.f, 0)), v3_norm_or_zero(v3(1.f, 3.f, 0))};
+	float plane_dist[] = {0.f, 2.f, 4.f};
 	size_t plane_materials[] = {1, 2, 3};
 	v3_t  sphere_centres[] = {v3(0,3.f,3),v3(5.f,0,3),v3(-4.f,3.f,6.f)};
 	float sphere_radii[] = {3.f, 2.f, 1.f};
@@ -229,7 +238,19 @@ main (int argc, char *argv[]) {
 			ray.norm = v3_neg(scene.cam_z);
 			ray.norm.x += nearplane_u;
 			ray.norm.y += nearplane_v;
-			raycast(ray, &scene, &buffer[x+y*xN]);
+			v3_t colour_accum = {};
+			float hit_dist = 0;
+			for(int s=0, sN=16; s<sN; ++s){
+				v3_t colour = {};
+				ray_t jittered_ray = ray;
+				hit_dist = raycast(jittered_ray, &scene, &colour);
+				if (FLT_MAX != hit_dist) {
+					colour_accum = v3_add(colour_accum, v3_mul(colour, 1.f/sN));
+				}
+			}
+			if(FLT_MAX != hit_dist){
+				buffer[x+y*xN] = rgb24_from_v3(colour_accum);
+			}
 		}
 	}
 
@@ -272,7 +293,7 @@ static void write_image_to_ppm(FILE *to, rgb24_t *pixels, size_t width, size_t h
 static settings_t parse_options(int argc, char *argv[]) {
 	settings_t result = { 800, 600, stdout };
 #if DEBUG
-	char *_argv[] = {"", "-o", "foo.ppm", "-w", "420", "-h", "256", 0};
+	char *_argv[] = {"", "-o", "foo.ppm", "-w", "800", "-h", "600", 0};
 	argv = _argv; argc = 7;
 #endif
 
